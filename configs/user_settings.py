@@ -6,10 +6,12 @@ if os.environ.get("SteamGameId") == "2406770":
     # Prevent external Vulkan layer hooks from conflicting with native Streamline Reflex
     os.environ.pop("LOW_LATENCY_LAYER", None)
     os.environ.pop("PROTON_ENABLE_WAYLAND", None)
+    # Strip 'no_upload_hvv' if set in Steam Launch Options to prevent NVRM intermapRegisterDmaMapping / gpu_vaspace.c:4155 crash
+    os.environ["VKD3D_CONFIG"] = "nodxr"
     user_settings.update({
         "PROTON_FORCE_NVAPI": "1",
         "DXVK_ENABLE_NVAPI": "1",
-        "VKD3D_CONFIG": "nodxr,no_upload_hvv",
+        "VKD3D_CONFIG": "nodxr",
         "MANGOHUD": "1",
         "__GL_GSYNC_ALLOWED": "1",
         "__GL_VRR_ALLOWED": "1",

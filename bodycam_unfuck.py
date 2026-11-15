@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 APP_ID = "2406770"
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 
 
 # ---------------------------------------------------------------------------
@@ -402,7 +402,7 @@ def patch_global_user_settings_sav(
     str_start = pos + 42
     obj = json.loads(raw[str_start:str_start + str_len - 1].decode("utf-8"))
 
-    obj["Virtual Shadow Maps"] = True
+    obj["Virtual Shadow Maps"] = False
     obj["Film Grain"] = False
     obj["Contact Shadows"] = False
     obj["Gamepad Sensitivity"] = float(sensitivity)
@@ -459,40 +459,32 @@ def build_cvar_block(preset: str, max_fps: int, vram_pool: int) -> List[str]:
         "r.D3D12.UseAllowTearing=1",
         "r.VSync=0",
         "",
-        "; --- 3. Internal Resolution & Texture Bandwidth (8GB VRAM Budget) ---",
+        "; --- 3. Internal Resolution & Strict 8GB VRAM Budget (Prevents NVRM gpu_vaspace Crash) ---",
         "r.NGX.DLSS.Enable=1",
         f"r.ScreenPercentage={screen_pct}",
         "r.ScreenPercentage.MaxResolution=1080",
         "r.SecondaryScreenPercentage.GameViewport=100",
         f"r.Streaming.PoolSize={vram_pool}",
+        "r.Streaming.MaxTempMemoryAllowed=64",
         f"r.Streaming.MipBias={mip_bias}",
         "r.Streaming.LimitPoolSizeToVRAM=1",
         "r.Streaming.HLODStrategy=2",
         "r.Streaming.FullyLoadUsedTextures=0",
         "r.RenderTargetPoolMin=300",
         "",
-        "; --- 4. Kill Nanite WPO Software Rasterization (CrazyIvy) + Fast Virtual Shadow Maps ---",
-        "r.Nanite.ProgrammableRaster=0",
+        "; --- 4. Nanite & Shadow Capping ---",
         "r.Nanite.MaxPixelsPerEdge=4",
         "r.Nanite.AsyncRasterization=1",
-        "r.Shadow.Virtual.Enable=1",
+        "r.Shadow.Virtual.Enable=0",
         "r.Shadow.Virtual.MaxPhysicalPages=1024",
-        "r.Shadow.Virtual.ResolutionLodBiasLocal=1.5",
-        "r.Shadow.Virtual.ResolutionLodBiasDirectional=1.0",
-        "r.Shadow.Virtual.SMRT.RayCountLocal=1",
-        "r.Shadow.Virtual.SMRT.SamplesPerRayLocal=2",
-        "r.Shadow.Virtual.SMRT.RayCountDirectional=1",
-        "r.Shadow.Virtual.SMRT.SamplesPerRayDirectional=2",
-        "r.Shadow.DistanceScale=0.7",
+        "r.Shadow.DistanceScale=0.6",
         "r.Shadow.MaxCSMResolution=1024",
-        "r.DistanceFieldShadowing=1",
         "foliage.LODDistanceScale=0.5",
         "grass.DensityScale=0.4",
         "",
-        "; --- 5. Fast Lumen Indirect Diffuse (Preserves Natural Bounce & Occlusion) ---",
+        "; --- 5. Fast Lumen (Preserves Natural Indoor Lighting & Sky Occlusion) ---",
         "r.VolumetricCloud=0",
         "r.VolumetricFog=0",
-        "r.Fog=0",
         f"r.Lumen.DiffuseIndirect.Allow={lumen_diffuse}",
         "r.Lumen.Reflections.Allow=0",
         "r.Lumen.Reflections.HardwareRayTracing=0",
@@ -566,15 +558,15 @@ bUseDesiredScreenHeight=True
 sg.ResolutionQuality={screen_pct}
 sg.ViewDistanceQuality=0
 sg.AntiAliasingQuality=0
-sg.ShadowQuality=1
-sg.GlobalIlluminationQuality=1
-sg.ReflectionQuality=0
-sg.PostProcessQuality=0
+sg.ShadowQuality=0
+sg.GlobalIlluminationQuality=2
+sg.ReflectionQuality=1
+sg.PostProcessQuality=3
 sg.TextureQuality=0
 sg.EffectsQuality=0
 sg.FoliageQuality=0
 sg.ShadingQuality=0
-sg.LandscapeQuality=0
+sg.LandscapeQuality=3
 """
 
 
@@ -586,10 +578,12 @@ if os.environ.get("SteamGameId") == "2406770":
     # Prevent external Vulkan layer hooks from conflicting with native Streamline Reflex
     os.environ.pop("LOW_LATENCY_LAYER", None)
     os.environ.pop("PROTON_ENABLE_WAYLAND", None)
+    # Strip 'no_upload_hvv' if set in Steam Launch Options to prevent NVRM intermapRegisterDmaMapping / gpu_vaspace.c:4155 crash
+    os.environ["VKD3D_CONFIG"] = "nodxr"
     user_settings.update({
         "PROTON_FORCE_NVAPI": "1",
         "DXVK_ENABLE_NVAPI": "1",
-        "VKD3D_CONFIG": "nodxr,no_upload_hvv",
+        "VKD3D_CONFIG": "nodxr",
         "MANGOHUD": "1",
         "__GL_GSYNC_ALLOWED": "1",
         "__GL_VRR_ALLOWED": "1",
