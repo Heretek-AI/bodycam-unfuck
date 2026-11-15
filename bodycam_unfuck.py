@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 APP_ID = "2406770"
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 
 
 # ---------------------------------------------------------------------------
@@ -441,10 +441,7 @@ def build_cvar_block(preset: str, max_fps: int, vram_pool: int) -> List[str]:
     mip_bias = 0 if preset == "quality-60" else 1
 
     return [
-        "; --- 1. Stop IMPERFECTER Plugin 4K Pass Multiplier ---",
-        "r.Imperfecter.FilterDynamicResAdjustment=0",
-        "",
-        "; --- 2. Enable Streamline Reflex Boost & Unload DLSS-G Tagging Overhead ---",
+        "; --- 1. Enable Streamline Reflex Boost & Unload DLSS-G Tagging Overhead ---",
         "t.Streamline.Reflex.Enable=1",
         "t.Streamline.Reflex.Auto=1",
         "t.Streamline.Reflex.Mode=2",
@@ -456,14 +453,13 @@ def build_cvar_block(preset: str, max_fps: int, vram_pool: int) -> List[str]:
         "r.Streamline.TagUIColorAlpha=0",
         f"t.MaxFPS={max_fps}",
         "",
-        "; --- 3. Zero-Lag Render Thread & Flip Queue ---",
-        "r.OneFrameThreadLag=0",
-        "r.GTSyncType=1",
+        "; --- 2. Parallel Game/Render Thread + Low-Latency Flip Queue ---",
+        "r.OneFrameThreadLag=1",
         "r.FinishCurrentFrame=0",
         "r.D3D12.UseAllowTearing=1",
         "r.VSync=0",
         "",
-        "; --- 4. Internal Resolution & Texture Bandwidth (8GB VRAM Budget) ---",
+        "; --- 3. Internal Resolution & Texture Bandwidth (8GB VRAM Budget) ---",
         "r.NGX.DLSS.Enable=1",
         f"r.ScreenPercentage={screen_pct}",
         "r.ScreenPercentage.MaxResolution=1080",
@@ -475,19 +471,19 @@ def build_cvar_block(preset: str, max_fps: int, vram_pool: int) -> List[str]:
         "r.Streaming.FullyLoadUsedTextures=0",
         "r.RenderTargetPoolMin=300",
         "",
-        "; --- 5. Kill Nanite WPO Software Rasterization (CrazyIvy) & VSM ---",
+        "; --- 4. Kill Nanite WPO Software Rasterization (CrazyIvy) & VSM ---",
         "r.Nanite.ProgrammableRaster=0",
-        "r.Nanite.MaxPixelsPerEdge=6",
+        "r.Nanite.MaxPixelsPerEdge=4",
         "r.Nanite.AsyncRasterization=1",
         "r.Shadow.Virtual.Enable=0",
         "r.Shadow.Virtual.MaxPhysicalPages=1024",
-        "r.Shadow.DistanceScale=0.5",
+        "r.Shadow.DistanceScale=0.6",
         "r.Shadow.MaxCSMResolution=1024",
         "r.DistanceFieldShadowing=0",
         "foliage.LODDistanceScale=0.5",
-        "grass.DensityScale=0.3",
+        "grass.DensityScale=0.4",
         "",
-        "; --- 6. Lighting Profile (Stripped Lumen vs Pure Raster) ---",
+        "; --- 5. Fast Lumen Indirect Diffuse (Preserves Natural Bounce & Occlusion) ---",
         "r.VolumetricCloud=0",
         "r.VolumetricFog=0",
         "r.Fog=0",
@@ -499,14 +495,10 @@ def build_cvar_block(preset: str, max_fps: int, vram_pool: int) -> List[str]:
         "r.Lumen.TranslucencyReflections.FrontLayer.Allow=0",
         "r.Lumen.ScreenProbeGather.DownsampleFactor=32",
         "r.Lumen.ScreenProbeGather.RadianceCache.GridResolution=24",
-        "r.Lumen.ScreenProbeGather.TracingOctahedronResolution=4",
-        "r.Lumen.ScreenProbeGather.ScreenTraces.HZBTraversal=0",
         "",
-        "; --- 7. Disable Standard Post-Process Overhead ---",
-        "r.BloomQuality=0",
+        "; --- 6. Safe Post-Process Reductions (Preserves 3D ColorGradingLUT & Histogram Exposure) ---",
         "r.FilmGrain=0",
         "r.Tonemapper.GrainQuantization=0",
-        "r.Tonemapper.Quality=1",
         "r.DepthOfFieldQuality=0",
         "r.DepthOfField.DepthBlur.Amount=0",
         "r.SceneColorFringeQuality=0",
@@ -515,7 +507,6 @@ def build_cvar_block(preset: str, max_fps: int, vram_pool: int) -> List[str]:
         "r.MotionBlurQuality=0",
         "r.MotionBlur.Max=0",
         "r.LensDistortion.AffectScreenPercentage=0",
-        "r.EyeAdaptationQuality=1",
         "r.AmbientOcclusionLevels=0",
         "r.SSR.Quality=0",
         "r.FidelityFX.FI.OverrideSwapChainDX12=0",
