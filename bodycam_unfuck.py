@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 APP_ID = "2406770"
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 
 
 # ---------------------------------------------------------------------------
@@ -402,7 +402,7 @@ def patch_global_user_settings_sav(
     str_start = pos + 42
     obj = json.loads(raw[str_start:str_start + str_len - 1].decode("utf-8"))
 
-    obj["Virtual Shadow Maps"] = False
+    obj["Virtual Shadow Maps"] = True
     obj["Film Grain"] = False
     obj["Contact Shadows"] = False
     obj["Gamepad Sensitivity"] = float(sensitivity)
@@ -471,15 +471,21 @@ def build_cvar_block(preset: str, max_fps: int, vram_pool: int) -> List[str]:
         "r.Streaming.FullyLoadUsedTextures=0",
         "r.RenderTargetPoolMin=300",
         "",
-        "; --- 4. Kill Nanite WPO Software Rasterization (CrazyIvy) & VSM ---",
+        "; --- 4. Kill Nanite WPO Software Rasterization (CrazyIvy) + Fast Virtual Shadow Maps ---",
         "r.Nanite.ProgrammableRaster=0",
         "r.Nanite.MaxPixelsPerEdge=4",
         "r.Nanite.AsyncRasterization=1",
-        "r.Shadow.Virtual.Enable=0",
+        "r.Shadow.Virtual.Enable=1",
         "r.Shadow.Virtual.MaxPhysicalPages=1024",
-        "r.Shadow.DistanceScale=0.6",
+        "r.Shadow.Virtual.ResolutionLodBiasLocal=1.5",
+        "r.Shadow.Virtual.ResolutionLodBiasDirectional=1.0",
+        "r.Shadow.Virtual.SMRT.RayCountLocal=1",
+        "r.Shadow.Virtual.SMRT.SamplesPerRayLocal=2",
+        "r.Shadow.Virtual.SMRT.RayCountDirectional=1",
+        "r.Shadow.Virtual.SMRT.SamplesPerRayDirectional=2",
+        "r.Shadow.DistanceScale=0.7",
         "r.Shadow.MaxCSMResolution=1024",
-        "r.DistanceFieldShadowing=0",
+        "r.DistanceFieldShadowing=1",
         "foliage.LODDistanceScale=0.5",
         "grass.DensityScale=0.4",
         "",
@@ -507,7 +513,6 @@ def build_cvar_block(preset: str, max_fps: int, vram_pool: int) -> List[str]:
         "r.MotionBlurQuality=0",
         "r.MotionBlur.Max=0",
         "r.LensDistortion.AffectScreenPercentage=0",
-        "r.AmbientOcclusionLevels=0",
         "r.SSR.Quality=0",
         "r.FidelityFX.FI.OverrideSwapChainDX12=0",
     ]
@@ -561,8 +566,8 @@ bUseDesiredScreenHeight=True
 sg.ResolutionQuality={screen_pct}
 sg.ViewDistanceQuality=0
 sg.AntiAliasingQuality=0
-sg.ShadowQuality=0
-sg.GlobalIlluminationQuality=0
+sg.ShadowQuality=1
+sg.GlobalIlluminationQuality=1
 sg.ReflectionQuality=0
 sg.PostProcessQuality=0
 sg.TextureQuality=0
