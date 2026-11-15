@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 APP_ID = "2406770"
-VERSION = "1.0.4"
+VERSION = "1.0.5"
 
 
 # ---------------------------------------------------------------------------
@@ -402,12 +402,12 @@ def patch_global_user_settings_sav(
     str_start = pos + 42
     obj = json.loads(raw[str_start:str_start + str_len - 1].decode("utf-8"))
 
-    obj["Virtual Shadow Maps"] = False
+    obj["Virtual Shadow Maps"] = True
     obj["Film Grain"] = False
-    obj["Contact Shadows"] = False
+    obj["Contact Shadows"] = True
     obj["Gamepad Sensitivity"] = float(sensitivity)
     obj["Gamepad ADS Sensitivity"] = float(ads_sensitivity)
-    obj["AA Method"] = {"newValue": 0, "incrementedValue": 0, "valueName": "Off"}
+    obj["AA Method"] = {"newValue": 2, "incrementedValue": 2, "valueName": "TAA"}
     obj["Upscaling Method"] = {"newValue": 4, "incrementedValue": 4, "valueName": "Nvidia DLSS"}
     obj["Upscaling Quality"] = {"newValue": 1, "incrementedValue": 1, "valueName": "Performance"}
     obj["Resolution Scale"] = 50
@@ -436,12 +436,10 @@ def patch_global_user_settings_sav(
 # ---------------------------------------------------------------------------
 
 def build_cvar_block(preset: str, max_fps: int, vram_pool: int) -> List[str]:
-    lumen_diffuse = 0 if preset == "raster-120" else 1
     screen_pct = 66 if preset == "quality-60" else 50
-    mip_bias = 0 if preset == "quality-60" else 1
 
     return [
-        "; --- 1. Enable Streamline Reflex Boost & Unload DLSS-G Tagging Overhead ---",
+        "; --- 1. Enable Streamline Reflex Boost & Unload Unused DLSS-G Plugin ---",
         "t.Streamline.Reflex.Enable=1",
         "t.Streamline.Reflex.Auto=1",
         "t.Streamline.Reflex.Mode=2",
@@ -449,8 +447,6 @@ def build_cvar_block(preset: str, max_fps: int, vram_pool: int) -> List[str]:
         "t.Streamline.Reflex.EnableLatencyMarkers=1",
         "r.Streamline.Load.DLSSG=0",
         "r.Streamline.DLSSG.Enable=0",
-        "r.Streamline.TagSceneColorWithoutHUD=0",
-        "r.Streamline.TagUIColorAlpha=0",
         f"t.MaxFPS={max_fps}",
         "",
         "; --- 2. Parallel Game/Render Thread + Low-Latency Flip Queue ---",
@@ -459,54 +455,30 @@ def build_cvar_block(preset: str, max_fps: int, vram_pool: int) -> List[str]:
         "r.D3D12.UseAllowTearing=1",
         "r.VSync=0",
         "",
-        "; --- 3. Internal Resolution & Strict 8GB VRAM Budget (Prevents NVRM gpu_vaspace Crash) ---",
+        "; --- 3. DLSS Performance Internal Resolution & Safe 8GB VRAM Pool ---",
         "r.NGX.DLSS.Enable=1",
         f"r.ScreenPercentage={screen_pct}",
         "r.ScreenPercentage.MaxResolution=1080",
-        "r.SecondaryScreenPercentage.GameViewport=100",
         f"r.Streaming.PoolSize={vram_pool}",
         "r.Streaming.MaxTempMemoryAllowed=64",
-        f"r.Streaming.MipBias={mip_bias}",
         "r.Streaming.LimitPoolSizeToVRAM=1",
-        "r.Streaming.HLODStrategy=2",
-        "r.Streaming.FullyLoadUsedTextures=0",
-        "r.RenderTargetPoolMin=300",
         "",
-        "; --- 4. Nanite & Shadow Capping ---",
-        "r.Nanite.MaxPixelsPerEdge=4",
-        "r.Nanite.AsyncRasterization=1",
-        "r.Shadow.Virtual.Enable=0",
+        "; --- 4. Safe VSM & Software Lumen (100% Stock Visuals, Safe 8GB VRAM Footprint) ---",
         "r.Shadow.Virtual.MaxPhysicalPages=1024",
-        "r.Shadow.DistanceScale=0.6",
-        "r.Shadow.MaxCSMResolution=1024",
-        "foliage.LODDistanceScale=0.5",
-        "grass.DensityScale=0.4",
-        "",
-        "; --- 5. Fast Lumen (Preserves Natural Indoor Lighting & Sky Occlusion) ---",
-        "r.VolumetricCloud=0",
-        "r.VolumetricFog=0",
-        f"r.Lumen.DiffuseIndirect.Allow={lumen_diffuse}",
-        "r.Lumen.Reflections.Allow=0",
-        "r.Lumen.Reflections.HardwareRayTracing=0",
         "r.Lumen.HardwareRayTracing=0",
-        "r.Lumen.TranslucencyVolume.Enable=0",
-        "r.Lumen.TranslucencyReflections.FrontLayer.Allow=0",
-        "r.Lumen.ScreenProbeGather.DownsampleFactor=32",
-        "r.Lumen.ScreenProbeGather.RadianceCache.GridResolution=24",
+        "r.Lumen.Reflections.HardwareRayTracing=0",
         "",
-        "; --- 6. Safe Post-Process Reductions (Preserves 3D ColorGradingLUT & Histogram Exposure) ---",
+        "; --- 5. Clean Camera (No Motion Blur / Film Grain / Chromatic Aberration) ---",
         "r.FilmGrain=0",
-        "r.Tonemapper.GrainQuantization=0",
         "r.DepthOfFieldQuality=0",
-        "r.DepthOfField.DepthBlur.Amount=0",
         "r.SceneColorFringeQuality=0",
         "r.SceneColorFringe.Max=0",
-        "r.LensBlurQuality=0",
         "r.MotionBlurQuality=0",
         "r.MotionBlur.Max=0",
-        "r.LensDistortion.AffectScreenPercentage=0",
-        "r.SSR.Quality=0",
         "r.FidelityFX.FI.OverrideSwapChainDX12=0",
+        "",
+        "[GameNetDriver StatelessConnectHandlerComponent]",
+        "CachedClientID=1",
     ]
 
 
@@ -523,7 +495,26 @@ AxisConfig=(AxisKeyName="Gamepad_RightY",AxisProperties=(DeadZone=0.050000,Sensi
 
 
 def build_game_user_settings_ini(max_fps: int, screen_pct: int = 50) -> str:
-    return f"""[/Script/Bodycam.CustomGameUserSettings]
+    return f""";METADATA=(Diff=true, UseCommands=true)
+[Internationalization]
+Culture=en
+
+[ScalabilityGroups]
+sg.ResolutionQuality={screen_pct}
+sg.ViewDistanceQuality=1
+sg.AntiAliasingQuality=2
+sg.ShadowQuality=1
+sg.GlobalIlluminationQuality=2
+sg.ReflectionQuality=2
+sg.PostProcessQuality=3
+sg.TextureQuality=1
+sg.EffectsQuality=1
+sg.FoliageQuality=0
+sg.ShadingQuality=1
+sg.LandscapeQuality=3
+
+[/Script/Bodycam.CustomGameUserSettings]
+CustomGameVersion=2
 bUseVSync=False
 bUseDynamicResolution=False
 ResolutionSizeX=1920
@@ -539,10 +530,10 @@ Version=5
 AudioQualityLevel=0
 LastConfirmedAudioQualityLevel=0
 FrameRateLimit={float(max_fps):.6f}
-DesiredScreenWidth=1920
-DesiredScreenHeight=1080
-LastUserConfirmedDesiredScreenWidth=1920
-LastUserConfirmedDesiredScreenHeight=1080
+DesiredScreenWidth=1280
+DesiredScreenHeight=720
+LastUserConfirmedDesiredScreenWidth=1280
+LastUserConfirmedDesiredScreenHeight=720
 LastRecommendedScreenWidth=-1.000000
 LastRecommendedScreenHeight=-1.000000
 LastCPUBenchmarkResult=-1.000000
@@ -552,21 +543,7 @@ bUseHDRDisplayOutput=False
 HDRDisplayOutputNits=1000
 
 [/Script/Engine.GameUserSettings]
-bUseDesiredScreenHeight=True
-
-[ScalabilityGroups]
-sg.ResolutionQuality={screen_pct}
-sg.ViewDistanceQuality=0
-sg.AntiAliasingQuality=0
-sg.ShadowQuality=0
-sg.GlobalIlluminationQuality=2
-sg.ReflectionQuality=1
-sg.PostProcessQuality=3
-sg.TextureQuality=0
-sg.EffectsQuality=0
-sg.FoliageQuality=0
-sg.ShadingQuality=0
-sg.LandscapeQuality=3
+bUseDesiredScreenHeight=False
 """
 
 
@@ -678,7 +655,7 @@ def cmd_install(args: argparse.Namespace, game_dir: Path, saved_dir: Path, proto
 
     print(f"[2/4] Writing & locking Engine, Scalability, and Input configs...")
     cvars = build_cvar_block(args.preset, args.fps, args.vram_pool)
-    engine_ini_text = "[SystemSettings]\n" + "\n".join(cvars) + "\n"
+    engine_ini_text = ";METADATA=(Diff=true, UseCommands=true)\n[SystemSettings]\n" + "\n".join(cvars) + "\n"
 
     cfg_dir = saved_dir / "Config/Windows"
     write_locked_config(cfg_dir / "Engine.ini", engine_ini_text)
@@ -687,6 +664,11 @@ def cmd_install(args: argparse.Namespace, game_dir: Path, saved_dir: Path, proto
     gus_path = cfg_dir / "GameUserSettings.ini"
     unlock_file(gus_path)
     gus_path.write_text(build_game_user_settings_ini(args.fps, screen_pct), encoding="utf-8")
+
+    # Remove stale PSO cache if present so UE5 rebuilds clean shaders
+    pso_cache = saved_dir / "Bodycam_PCD3D_SM6.upipelinecache"
+    if pso_cache.exists():
+        pso_cache.unlink(missing_ok=True)
 
     sav_path = saved_dir / "SaveGames/GlobalUserSettings.sav"
     print(f"[3/4] Surgically patching UE5.5 GVAS save file: {sav_path}")
@@ -753,7 +735,7 @@ def main() -> int:
         help="Lighting/performance preset (default: lumen-120)",
     )
     parser.add_argument("--fps", type=int, default=120, help="Target framerate cap (default: 120)")
-    parser.add_argument("--vram-pool", type=int, default=2400, help="Texture streaming pool in MB (default: 2400)")
+    parser.add_argument("--vram-pool", type=int, default=1600, help="Texture streaming pool in MB (default: 1600)")
     parser.add_argument("--sensitivity", type=float, default=3.2, help="Gamepad look sensitivity (default: 3.2)")
     parser.add_argument("--ads-sensitivity", type=float, default=1.2, help="Gamepad ADS sensitivity (default: 1.2)")
     parser.add_argument(
