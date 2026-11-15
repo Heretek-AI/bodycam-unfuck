@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 APP_ID = "2406770"
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 
 # ---------------------------------------------------------------------------
@@ -402,7 +402,6 @@ def patch_global_user_settings_sav(
     str_start = pos + 42
     obj = json.loads(raw[str_start:str_start + str_len - 1].decode("utf-8"))
 
-    obj["Hardware Ray-Tracing Lumen"] = False
     obj["Virtual Shadow Maps"] = False
     obj["Film Grain"] = False
     obj["Contact Shadows"] = False
@@ -429,7 +428,6 @@ def patch_global_user_settings_sav(
         + raw[str_start + str_len:]
     )
     sav_path.write_bytes(new_raw)
-    lock_file(sav_path)
     return True
 
 
@@ -443,11 +441,8 @@ def build_cvar_block(preset: str, max_fps: int, vram_pool: int) -> List[str]:
     mip_bias = 0 if preset == "quality-60" else 1
 
     return [
-        "; --- 1. Kill IMPERFECTER Plugin Mip-Pinning & 4K Pass Multiplier ---",
-        "r.Imperfecter.EnableStreaming=0",
-        "r.Imperfecter.AutomaticProxyUpdates=0",
+        "; --- 1. Stop IMPERFECTER Plugin 4K Pass Multiplier ---",
         "r.Imperfecter.FilterDynamicResAdjustment=0",
-        "r.Imperfecter.SVEPriority=-999",
         "",
         "; --- 2. Enable Streamline Reflex Boost & Unload DLSS-G Tagging Overhead ---",
         "t.Streamline.Reflex.Enable=1",
@@ -680,31 +675,33 @@ def cmd_install(args: argparse.Namespace, game_dir: Path, saved_dir: Path, proto
     exe_path = game_dir / "Bodycam/Binaries/Win64/Bodycam-Win64-Shipping.exe"
     patcher = PEBinaryPatcher(exe_path)
 
-    print(f"[1/4] Patching binary: {exe_path}")
-    res = patcher.apply()
-    for name, (foff, status) in res.items():
-        print(f"      -> {name} @ {hex(foff)}: {status}")
+    if args.offline_binary_patch:
+        print(f"[1/4] Patching binary (offline/no-EAC mode): {exe_path}")
+        res = patcher.apply()
+        for name, (foff, status) in res.items():
+            print(f"      -> {name} @ {hex(foff)}: {status}")
+    else:
+        print(f"[1/4] Keeping {exe_path.name} unmodified (EasyAntiCheat catalogue safe)")
+        if patcher.bak_path.exists():
+            patcher.restore()
+            patcher.bak_path.unlink(missing_ok=True)
 
     print(f"[2/4] Writing & locking Engine, Scalability, and Input configs...")
     cvars = build_cvar_block(args.preset, args.fps, args.vram_pool)
     engine_ini_text = "[SystemSettings]\n" + "\n".join(cvars) + "\n"
-    console_vars_text = "[Startup]\n" + "\n".join(c for c in cvars if c and not c.startswith(";")) + "\n"
 
     cfg_dir = saved_dir / "Config/Windows"
     write_locked_config(cfg_dir / "Engine.ini", engine_ini_text)
     write_locked_config(cfg_dir / "Input.ini", INPUT_INI_CONTENT)
     screen_pct = 66 if args.preset == "quality-60" else 50
-    write_locked_config(cfg_dir / "GameUserSettings.ini", build_game_user_settings_ini(args.fps, screen_pct))
-
-    engine_cvars_path = game_dir / "Engine/Config/ConsoleVariables.ini"
-    engine_cvars_path.parent.mkdir(parents=True, exist_ok=True)
-    unlock_file(engine_cvars_path)
-    engine_cvars_path.write_text(console_vars_text, encoding="utf-8")
+    gus_path = cfg_dir / "GameUserSettings.ini"
+    unlock_file(gus_path)
+    gus_path.write_text(build_game_user_settings_ini(args.fps, screen_pct), encoding="utf-8")
 
     sav_path = saved_dir / "SaveGames/GlobalUserSettings.sav"
     print(f"[3/4] Surgically patching UE5.5 GVAS save file: {sav_path}")
     if patch_global_user_settings_sav(sav_path, args.sensitivity, args.ads_sensitivity):
-        print("      -> Injected missing EGUI keys, disabled Lumen HWRT/VSM/DLAA, set DLSS Performance & sensitivity")
+        print("      -> Disabled VSM/DLAA/FilmGrain, set DLSS Performance & controller sensitivity")
     else:
         print("      -> GlobalUserSettings.sav not found yet (will be created by game)")
 
@@ -769,6 +766,11 @@ def main() -> int:
     parser.add_argument("--vram-pool", type=int, default=2400, help="Texture streaming pool in MB (default: 2400)")
     parser.add_argument("--sensitivity", type=float, default=3.2, help="Gamepad look sensitivity (default: 3.2)")
     parser.add_argument("--ads-sensitivity", type=float, default=1.2, help="Gamepad ADS sensitivity (default: 1.2)")
+    parser.add_argument(
+        "--offline-binary-patch",
+        action="store_true",
+        help="Also patch Bodycam-Win64-Shipping.exe directly (offline/no-EAC only; triggers EAC catalogue mismatch if launched via Bodycam.exe)",
+    )
     parser.add_argument("--game-dir", default=None, help="Path to Steam/steamapps/common/Bodycam")
     parser.add_argument("--saved-dir", default=None, help="Path to Bodycam/Saved directory")
 
