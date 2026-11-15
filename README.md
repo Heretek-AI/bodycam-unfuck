@@ -1,23 +1,23 @@
 # bodycam-unfuck
 
-**Reverse-Engineered Binary & Engine Patcher for *Bodycam* (Unreal Engine 5.5.4)**  
-*Doubles framerate (48 FPS → 100–120 FPS), caps VRAM under 5 GB on 8 GB GPUs, and eliminates 75–120 ms of controller input latency.*
+**Reverse-Engineered Engine, Save, & Launch Patcher for *Bodycam* (Unreal Engine 5.5.4)**  
+*Doubles framerate (`48 FPS` → `75–120 FPS`), caps VRAM safely under 8 GB without kernel DMA lockups, preserves authentic bodycam lighting/post-processing, and eliminates `75–120 ms` of controller input latency while remaining EasyAntiCheat (EAC) compatible by default.*
 
 ---
 
 ## Why Does *Bodycam* Run Poorly on High-End Hardware?
 
-We reverse-engineered `Bodycam-Win64-Shipping.exe`, `pakchunk0-Windows.pak`, and `pakchunk0_s25-Windows.pak` on an **Intel Core i9-14900HX + RTX 4070 (8 GB VRAM)** system and discovered **six concrete game-level architectural bugs** caused by unoptimized UE5 Marketplace plugins stacked on top of one another:
+We reverse-engineered `Bodycam-Win64-Shipping.exe`, `pakchunk0-Windows.pak`, and `pakchunk0_s25-Windows.pak` on an **Intel Core i9-14900HX + NVIDIA RTX 4070 (8 GB VRAM)** Linux/Proton system and discovered **six concrete game- and engine-level architectural defects** alongside **three critical Unreal Engine 5.5 / VKD3D-Proton pitfalls**:
 
 ```mermaid
 flowchart TD
     subgraph Bugs["6 Game/Engine-Level Architectural Defects in Bodycam"]
-        B1["1. IMPERFECTER & BPPF Plugins\n19 full-screen RDG compute shaders (IMPRF*CS.usf)\n+ forced mip residency + 4K blur pass multiplier"]
+        B1["1. IMPERFECTER Plugin Forced Mip Residency\nr.Imperfecter.EnableStreaming=1 forces all mip levels\nresident in VRAM across every Imperfecter effect"]
         B2["2. EGUI Blueprint CVar Hijacking\nSettingsV2Managers executes Console Commands\nat ECVF_SetByConsole priority (overrides Engine.ini)"]
         B3["3. Beta SDLJoystick Plugin\nUSDLJoystickSubsystem opens & polls Xbox controllers\nvia SDL2.dll simultaneously alongside XInput"]
         B4["4. InputModifipad DeltaTime Scaling\nMultiplies thumbstick Vector2D by DeltaTime\ninto a heavy free-aim spring deadbox"]
         B5["5. Streamline Reflex Catch-22\nUnregisters UE5 Reflex (UnregisterReflexPlugin=1)\nwhile leaving Streamline Reflex OFF (Enable=0)"]
-        B6["6. Nanite WPO + 4K Mip Bloat\nCrazyIvy WPO forces software Nanite rasterization;\nDLSS-G tags scene buffers even when disabled"]
+        B6["6. Unbounded VSM Physical Pages & Texture Pool\nOverflows 8 GB VRAM on 4K displays, causing\nPCIe thrashing or NVRM DMA mapping crashes"]
     end
 ```
 
@@ -25,15 +25,20 @@ flowchart TD
 
 ## Quick Start (Linux / Proton / Steam Deck & Windows)
 
-Zero external dependencies (requires only Python 3.8+ standard library). Automatically discovers your Steam library, `Bodycam-Win64-Shipping.exe`, and `Saved` directory on both **Linux (Proton)** and **Windows**.
+Zero external dependencies (requires only Python 3.8+ standard library). Automatically discovers your Steam library, `Bodycam-Win64-Shipping.exe`, `Saved` directory, and Steam `localconfig.vdf` on both **Linux (Proton)** and **Windows**.
 
-### One-Command Install
+### One-Command Install (EAC-Safe Online Mode — Default)
+
+By default, `bodycam_unfuck.py` keeps `Bodycam-Win64-Shipping.exe` **100% unmodified** so EasyAntiCheat (`Bodycam.exe`) passes catalogue verification for online multiplayer while applying all `Engine.ini`, `GameUserSettings.ini`, `Input.ini`, `GlobalUserSettings.sav` (`GVAS`), and Steam Proton launch option patches:
 
 ```bash
 git clone https://github.com/Heretek-AI/bodycam-unfuck.git
 cd bodycam-unfuck
 python3 bodycam_unfuck.py install
 ```
+
+> [!NOTE]
+> Make sure **Steam is closed** when running `python3 bodycam_unfuck.py install` on Linux so Steam does not overwrite `localconfig.vdf` on exit.
 
 ### Check Patch Status
 
@@ -50,46 +55,32 @@ python3 bodycam_unfuck.py uninstall
 ### CLI Options & Presets
 
 ```bash
-# Default: 120 FPS target with Ultra-Fast Stripped Lumen (preserves indoor bounce lighting)
+# Default: EAC-safe 120 FPS target with software Lumen GI + Reflections & bounded VSM (preserves authentic lighting)
 python3 bodycam_unfuck.py install --preset lumen-120
 
-# Maximum FPS: Pure Raster (disables Lumen indirect diffuse completely for maximum GPU headroom)
-python3 bodycam_unfuck.py install --preset raster-120
+# Custom framerate cap, VRAM streaming pool (MB), and controller sensitivity
+python3 bodycam_unfuck.py install --fps 120 --vram-pool 1600 --sensitivity 3.2 --ads-sensitivity 1.2
 
-# Custom framerate cap, VRAM pool (MB), and controller sensitivity
-python3 bodycam_unfuck.py install --fps 120 --vram-pool 2400 --sensitivity 3.2 --ads-sensitivity 1.2
+# Optional: Offline/LAN binary patch for Bodycam-Win64-Shipping.exe (bypasses EAC)
+python3 bodycam_unfuck.py install --offline-binary-patch
 ```
 
 ---
 
 ## Technical Breakdown: The 6 Bugs & How `bodycam-unfuck` Fixes Them
 
-### 1. The `IMPERFECTER` Plugin's 19 Full-Screen Compute Shaders & Forced Mip Residency
+### 1. The `IMPERFECTER` Plugin's Forced Mip Residency (`r.Imperfecter.EnableStreaming=1`)
 
-Instead of using Unreal Engine 5's built-in post-process tonemapper, *Bodycam* uses the `IMPERFECTER` Marketplace plugin (`UImperfecterSubsystem` + `FImperfecterSceneViewExtension`) alongside `BodycamPostProcessFramework` (`UBppfSubsystem`).
+*Bodycam* uses the `IMPERFECTER` Marketplace plugin (`UImperfecterSubsystem` + `FImperfecterSceneViewExtension`) alongside `BodycamPostProcessFramework` (`UBppfSubsystem`) for its signature bodycam lens distortion, halation, chromatic aberration, and color grading.
 
-Binary inspection of `Bodycam-Win64-Shipping.exe` (`0x6516642`–`0x652493d`) revealed that `FImperfecterSceneViewExtension` injects **19 custom full-screen RDG compute shaders** into the frame graph every frame:
+Binary inspection of `Bodycam-Win64-Shipping.exe` (`0x6516642`–`0x652493d`) revealed that `FImperfecterSceneViewExtension` injects **19 custom full-screen RDG compute shaders** into the frame graph (`IMPRFCompressionArtifacts*CS.usf`, `IMPRFHalation*CS.usf`, `IMPRFLensDirt*CS.usf`, `IMPRFInterlacingCS.usf`, `IMPRFFilmDamageCS.usf`, `IMPRFNoiseGrainCS.usf`, `IMPRFChromaticAberrationCS.usf`, `IMPRFLensDistortionCS.usf`, etc.).
 
-| RDG Compute Shader | Purpose |
-|---|---|
-| `IMPRFCompressionArtifactsQuantizeCS.usf` | Fake JPEG/MPEG block quantization |
-| `IMPRFCompressionArtifactsComputeBlockActivitiesCS.usf` | Block activity analysis |
-| `IMPRFCompressionArtifactsComputeBlockOffsetsCS.usf` | Block offset calculation |
-| `IMPRFCompressionArtifactsDeblockCS.usf` | Fake MPEG deblocking filter |
-| `IMPRFHalationSetupCS.usf` + `IMPRFHalationUpsampleCombineCS.usf` | Multi-pass film halation |
-| `IMPRFLensDirtSetupCS.usf` + `IMPRFLensDirtCS.usf` | Multi-pass luminance & Gaussian lens dirt |
-| `IMPRFInterlacingCS.usf` | Blends `PrevFrameSceneColor` (adds visual ghosting/lag) |
-| `IMPRFFilmDamageCS.usf` & `IMPRFNoiseGrainCS.usf` | Full-screen film damage & procedural/texture grain |
-| `IMPRFChromaticAberrationCS.usf` & `IMPRFLensDistortionCS.usf` | Chromatic aberration & lens distortion |
-| `IMPRFDownsampleCS.usf`, `IMPRFUpsampleCS.usf`, `IMPRFGaussianBlurCS.usf` | Multi-pass pyramid downsample/upsample chains |
-| `IMPRFSoftenPrepareMaskCS.usf`, `IMPRFSharpenCS.usf`, `IMPRFOverlayCS.usf` | Soften mask, sharpen, and overlay passes |
-
-Because `Imperfecter` runs as an external `FSceneViewExtension`, standard UE5 CVars like `r.FilmGrain=0` or `sg.PostProcessQuality=0` **do not disable it**. Worse, extracting `Imperfecter`'s internal CVar table (`0x91028c8`–`0x9103720`) exposed two hidden performance killers enabled by default:
-1. **`r.Imperfecter.EnableStreaming=1` (Default `true`)**: *"Forces all mip levels to be resident for every texture asset referenced by any Imperfecter Effect from all Imperfecter Instance Actors for the current world."*
-2. **`r.Imperfecter.FilterDynamicResAdjustment=1` (Default `true`)**: Dynamically increases the number of downsample/upsample Gaussian blur passes when running on high-resolution (e.g. 4K) viewports.
+Extracting `Imperfecter`'s internal CVar table (`0x91028c8`–`0x9103720`) exposed why it bloats VRAM on 8 GB GPUs:
+- **`r.Imperfecter.EnableStreaming=1` (Default `true`)**: *"Forces all mip levels to be resident for every texture asset referenced by any Imperfecter Effect from all Imperfecter Instance Actors for the current world."*
 
 **Fix**:
-`bodycam_unfuck.py` dynamically locates `FImperfecterSceneViewExtension::GetPriority()` via its XREF to `r.Imperfecter.SVEPriority`, walks the `FImperfecterSceneViewExtension` vtable in `.rdata` to `vtable[-5]` (`SubscribeToPostProcessingPass` at `0x6526c60`), and patches its entry byte to `c3` (`ret`), bypassing all 19 RDG compute shaders with zero GPU/CPU overhead. It also sets `r.Imperfecter.EnableStreaming=0`, `r.Imperfecter.AutomaticProxyUpdates=0`, and `r.Imperfecter.FilterDynamicResAdjustment=0`.
+- In **EAC-Safe Mode (default)**, `bodycam_unfuck.py` sets `r.Imperfecter.EnableStreaming=0` so Imperfecter's lens dirt and overlay textures obey standard mip streaming instead of pinning all 4K mips in VRAM, while keeping `r.Imperfecter.AutomaticProxyUpdates=1` and `r.Imperfecter.FilterDynamicResAdjustment=1` intact so `AImperfecterInstanceActor` properly uploads its initial `SceneColorLuminanceFactor=1.0` and renders authentic lens post-processing.
+- In **`--offline-binary-patch` Mode**, `bodycam_unfuck.py` can also dynamically locate `FImperfecterSceneViewExtension::SubscribeToPostProcessingPass` (`vtable[-5]` at `0x6526c60`) and patch its entry byte to `c3` (`ret`).
 
 ---
 
@@ -117,13 +108,14 @@ Disassembling `USDLJoystickSubsystem::Initialize` in `Bodycam-Win64-Shipping.exe
 4c5143e: c6 43 58 00             mov  byte ptr [rbx+0x58], 0    ; this->bInitialized = false
 4c51442: 48 83 c4 20             add  rsp, 0x20
 4c51446: 5b                      pop  rbx
-4c51447: c3                      ret
+120: 4c51447: c3                      ret
 ```
 
 Because of this, `SDL2.dll` opens and polls Xbox/XInput controllers every GameThread tick **simultaneously** alongside Unreal Engine's native `XInputDevice`, causing USB/HID contention and polling jitter.
 
 **Fix**:
-`bodycam_unfuck.py` dynamically locates `USDLJoystickSubsystem::Initialize` via the `"SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"` XREF and patches `0x4c51403` to `eb 39 90 90 90 90 90` (`jmp 0x4c5143e`), jumping directly from `Super::Initialize` to `this->bInitialized = false; ret`.
+- **EAC-Safe Mode (default)**: Injects `SDL_AUTO_UPDATE_JOYSTICKS=0 SDL_JOYSTICK_HIDAPI=0 SDL_JOYSTICK_RAWINPUT=0 SDL_JOYSTICK_WGI=0 SDL_GAMECONTROLLER_IGNORE_DEVICES=0x045e/0x028e SDL_JOYSTICK_BLACKLIST_DEVICES=0x045e/0x028e` into the Steam Proton environment so `SDL2.dll` ignores Xbox/XInput controllers while `XInput1_4` retains exclusive zero-contention access.
+- **`--offline-binary-patch` Mode**: Dynamically locates `USDLJoystickSubsystem::Initialize` via the `"SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"` XREF and patches `0x4c51403` to `eb 39 90 90 90 90 90` (`jmp 0x4c5143e`), jumping directly from `Super::Initialize` to `this->bInitialized = false; ret`.
 
 ---
 
@@ -135,7 +127,7 @@ In Unreal Engine 5, Console Variables obey a strict priority hierarchy:
 Inspecting `/Game/UI/Menus/SettingsV2Managers/` in `pakchunk0_s25-Windows.pak` (`0xd9a3a1c`–`0xd9b73d7`) revealed that *Bodycam*'s `Easy Game UI (EGUI)` Blueprints (`BP_Master`, `FL_EGUI_Easy`, `BP_GlobalIllumination`, `BP_Reflections`, `BP_HardwareLumenRT`) call `ExecuteConsoleCommand` at runtime with `ECVF_SetByConsole` priority—silently overriding `Engine.ini`. Furthermore, when keys like `"Hardware Ray-Tracing Lumen"` are missing from `GlobalUserSettings.sav`, `BP_Master` falls back to its hardcoded `ValidatedDefault` (`"Lumen High"`, `"DLAA"`) on every launch.
 
 **Fix**:
-`bodycam_unfuck.py` surgically parses UE5.5's `GVAS` binary format in `GlobalUserSettings.sav`, injects the missing keys (`"Hardware Ray-Tracing Lumen": false`, `"Virtual Shadow Maps": false`, `"Film Grain": false`, `"Contact Shadows": false`), sets `Upscaling Method: Nvidia DLSS` (`Performance`, `Resolution Scale: 50`) and `AA Method: Off`, updates the 32-bit `StrProperty` length headers, and locks `GlobalUserSettings.sav`, `Engine.ini`, `GameUserSettings.ini`, and `Input.ini` read-only (`0444`).
+`bodycam_unfuck.py` surgically parses UE5.5's `GVAS` binary format in `GlobalUserSettings.sav`, injects the missing keys (`"Hardware Ray-Tracing Lumen": false`, `"Virtual Shadow Maps": true`, `"Film Grain": false`, `"Contact Shadows": false`), sets `Upscaling Method: Nvidia DLSS` (`Performance`, `Resolution Scale: 50`) and `AA Method: Off`, updates the 32-bit `StrProperty` length headers, locks `Engine.ini` and `Input.ini` read-only (`0444`), and keeps `GlobalUserSettings.sav` and `GameUserSettings.ini` writable (`0644`) so `BP_Master` never hangs on startup save-write checks.
 
 ---
 
@@ -148,7 +140,7 @@ Inspecting the `StreamlineRHI` CVar table in `Bodycam-Win64-Shipping.exe` (`0x8a
 - Meanwhile, `r.Streamline.Load.DLSSG=1` and `r.Streamline.TagSceneColorWithoutHUD=1` remain enabled even when DLSS-G is off, wasting RenderThread CPU and VRAM tagging HUD-less scene color buffers every frame.
 
 **Fix**:
-Forces `t.Streamline.Reflex.Enable=1`, `t.Streamline.Reflex.Mode=2` (Low Latency + Boost), `t.Streamline.Reflex.HandleMaxTickRate=1`, and disables DLSS-G loading/tagging (`r.Streamline.Load.DLSSG=0`, `r.Streamline.TagSceneColorWithoutHUD=0`).
+Forces `t.Streamline.Reflex.Enable=1`, `t.Streamline.Reflex.Mode=2` (Low Latency + Boost), `t.Streamline.Reflex.HandleMaxTickRate=1`, and disables DLSS-G loading/tagging (`r.Streamline.Load.DLSSG=0`, `r.Streamline.TagSceneColorWithoutHUD=0`) while keeping `r.OneFrameThreadLag=1` so `GameThread` and `RenderThread` execute in parallel (`85%+` GPU utilization) with Reflex dynamically pacing submission right before RHI present.
 
 ---
 
@@ -161,12 +153,21 @@ Drops axial deadzones to `0.05` (5%) with a linear `1.0` exponent and zero smoot
 
 ---
 
-### 6. Nanite Programmable Rasterization (`CrazyIvy` WPO) & 8 GB VRAM Budgeting
+### 6. 8 GB VRAM Budgeting & Avoiding the UE5 "White Chrome" Specular Bug + NVIDIA `NVRM` DMA Crash
 
-Dense `CrazyIvy` and foliage meshes use World Position Offset (WPO) on Nanite clusters, forcing the GPU out of fast hardware Nanite rasterization into slow software programmable rasterization.
+During iterative testing on an 8 GB RTX 4070 Laptop GPU running on a 4K display, we uncovered three critical interactions between *Bodycam*'s materials, Unreal Engine 5.5's Lumen/VSM pipeline, and VKD3D-Proton:
 
-**Fix**:
-Sets `r.Nanite.ProgrammableRaster=0`, `r.Nanite.MaxPixelsPerEdge=6`, `r.Streaming.MipBias=1`, and `r.Streaming.PoolSize=2400`, cutting VRAM consumption from `7.8+ GB` (stuttering/paging over PCIe) down to a rock-solid **`4.2–5.0 GB`** while doubling GPU framerate.
+1. **Why Lumen Reflections & Virtual Shadow Maps Must Stay Enabled (The "White Chrome" Bug)**:
+   *Bodycam*'s materials (weapons, gloves, sleeves, concrete floors, leather couches, rocks) rely on **Lumen Reflections** and **Virtual Shadow Maps (VSM)** for indoor specular occlusion and roof/wall shadowing. If you disable VSM (`r.Shadow.Virtual.Enable=0`) or disable Lumen Reflections (`r.Lumen.Reflections.Allow=0`, `r.SSR.Quality=0`, `sg.ReflectionQuality=0`) or set `r.Lumen.ScreenProbeGather.DownsampleFactor=32`, UE5 falls back to sampling the **raw unoccluded outdoor `SkyLight` cubemap** on every normal-mapped surface—making the entire indoor environment and viewmodel glow like white chrome.
+2. **Why `sg.PostProcessQuality=3` Must Be Preserved**:
+   Setting `sg.PostProcessQuality=0` or `r.Tonemapper.Quality=1` disables UE5's 3D `ColorGradingLUT` and histogram auto-exposure, causing `BodycamPostProcessFramework` (`BPPF`) to blow out highlights and wash out shadows.
+3. **Why `no_upload_hvv` Must NEVER Be Used in `VKD3D_CONFIG` With UE5 VSM on NVIDIA**:
+   Passing `VKD3D_CONFIG=nodxr,no_upload_hvv` blocks VKD3D-Proton from using Resizable BAR (`HOST_VISIBLE` VRAM) for UE5's Virtual Shadow Map page tables and Nanite upload buffers, forcing the NVIDIA Linux kernel driver (`nvidia.ko`) to register thousands of host-RAM PCIe DMA mappings until the kernel's DMA mapping tree overflows and locks up the display (`NVRM: intermapRegisterDmaMapping: Failed to insert new mapping node!` / `Assertion failed: NV_OK == status @ gpu_vaspace.c:4155`).
+
+**Fix (`v1.0.5`)**:
+- Keeps **Virtual Shadow Maps (`"Virtual Shadow Maps": true`, `sg.ShadowQuality=1`)**, **Software Lumen GI (`sg.GlobalIlluminationQuality=2`)**, **Lumen Reflections (`sg.ReflectionQuality=2`)**, and **Post-Processing (`sg.PostProcessQuality=3`)** intact so lighting, reflections, and color grading look 100% authentic.
+- Caps Virtual Shadow Map physical pages (`r.Shadow.Virtual.MaxPhysicalPages=1024`) and texture streaming pool (`r.Streaming.PoolSize=1600`, `r.Streaming.LimitPoolSizeToVRAM=1`) while clamping internal render resolution to **1080p via DLSS Performance (`r.ScreenPercentage=50`, `r.ScreenPercentage.MaxResolution=1080`)**.
+- Configures `VKD3D_CONFIG=nodxr` (stripping `no_upload_hvv` if previously present) so VKD3D-Proton uses Resizable BAR (`HOST_VISIBLE` VRAM) cleanly without overflowing NVIDIA kernel DMA mappings.
 
 ---
 
